@@ -1,0 +1,32 @@
+# Node.js / Server
+node_modules/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.env
+.env.local
+
+# Flutter / Dart / Mobile
+.dart_tool/
+.packages
+build/
+.pub-cache/
+.pub/
+*.lock
+!pubspec.lock
+
+# Android
+**/android/.gradle
+**/android/local.properties
+**/android/**/build
+**/android/**/app/build
+**/android/**/.cxx
+
+# IDE & OS
+.vscode/
+.idea/
+*.iml
+.DS_Store
+*.log

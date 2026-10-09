@@ -1,0 +1,30 @@
+name: orbit
+description: "Orbit - Transferência direta de arquivos e sincronização em tempo real na rede local."
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=3.10.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_riverpod: ^2.5.1
+  dio: ^5.5.0+1
+  web_socket_channel: ^3.0.1
+  crypto: ^3.0.3
+  file_picker: ^8.0.5
+  mobile_scanner: ^5.1.1
+  shared_preferences: ^2.2.3
+  path: ^1.9.0
+  intl: ^0.19.0
+  flutter_animate: ^4.5.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

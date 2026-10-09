@@ -1,0 +1,16 @@
+[Unit]
+Description=Orbit Local Transfer Server Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=%I
+WorkingDirectory=%h/Documentos/Dev/Projetos/Orbit/server
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+MemoryMax=50M
+
+[Install]
+WantedBy=default.target
