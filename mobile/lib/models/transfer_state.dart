@@ -10,6 +10,7 @@ enum TransferStatus {
 class TransferItem {
   final String id;
   final String filename;
+  final String filePath;
   final int totalBytes;
   final int bytesTransferred;
   final double percentage;
@@ -21,6 +22,7 @@ class TransferItem {
   const TransferItem({
     required this.id,
     required this.filename,
+    required this.filePath,
     required this.totalBytes,
     this.bytesTransferred = 0,
     this.percentage = 0.0,
@@ -33,6 +35,7 @@ class TransferItem {
   TransferItem copyWith({
     String? id,
     String? filename,
+    String? filePath,
     int? totalBytes,
     int? bytesTransferred,
     double? percentage,
@@ -44,6 +47,7 @@ class TransferItem {
     return TransferItem(
       id: id ?? this.id,
       filename: filename ?? this.filename,
+      filePath: filePath ?? this.filePath,
       totalBytes: totalBytes ?? this.totalBytes,
       bytesTransferred: bytesTransferred ?? this.bytesTransferred,
       percentage: percentage ?? this.percentage,

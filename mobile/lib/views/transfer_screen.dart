@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/transfer_state.dart';
 import '../viewmodels/transfer_viewmodel.dart';
 import '../widgets/transfer_progress_bar.dart';
 
@@ -36,7 +37,13 @@ class TransferScreen extends ConsumerWidget {
               padding: const EdgeInsets.all(16.0),
               itemCount: transfers.length,
               itemBuilder: (context, index) {
-                return TransferProgressBar(item: transfers[index]);
+                final item = transfers[index];
+                return TransferProgressBar(
+                  item: item,
+                  onRetry: item.status == TransferStatus.failed
+                      ? () => ref.read(transferViewModelProvider.notifier).retryTransfer(item.id)
+                      : null,
+                );
               },
             ),
       floatingActionButton: FloatingActionButton.extended(

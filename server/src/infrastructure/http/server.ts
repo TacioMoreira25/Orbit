@@ -45,6 +45,30 @@ export function buildServer(dependencies: ServerDependencies): FastifyInstance {
   });
   app.register(websocket);
 
+  // Tratamento de erros centralizado e padronizado
+  app.setErrorHandler((error, _request, reply) => {
+    const statusCode = error.statusCode || 500;
+    return reply.status(statusCode).send({
+      error: error.message || 'Erro interno no servidor Orbit.',
+      code: error.code || 'INTERNAL_SERVER_ERROR',
+      statusCode,
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  // Middleware de autorização Bearer Token
+  const requireAuth = async (request: any, reply: any) => {
+    const authHeader = request.headers['authorization'];
+    if (!authHeader || !pairingManager.isTokenValid(authHeader)) {
+      return reply.status(401).send({
+        error: 'Dispositivo não autorizado. Pareie o dispositivo novamente via QR Code ou PIN.',
+        code: 'UNAUTHORIZED',
+        statusCode: 401,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  };
+
   // Status e Healthcheck
   app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
   app.get('/status', async () => getServerStatusUseCase.execute());
@@ -53,7 +77,12 @@ export function buildServer(dependencies: ServerDependencies): FastifyInstance {
   app.post('/api/pair', async (request, reply) => {
     const parseResult = PairRequestSchema.safeParse(request.body);
     if (!parseResult.success) {
-      return reply.status(400).send({ error: parseResult.error.errors[0].message });
+      return reply.status(400).send({
+        error: parseResult.error.errors[0].message,
+        code: 'VALIDATION_ERROR',
+        statusCode: 400,
+        timestamp: new Date().toISOString(),
+      });
     }
 
     const { pin, deviceName, platform } = parseResult.data;
@@ -67,28 +96,43 @@ export function buildServer(dependencies: ServerDependencies): FastifyInstance {
     });
 
     if (!authResult.success) {
-      return reply.status(401).send(authResult);
+      return reply.status(401).send({
+        error: authResult.message || 'PIN de pareamento incorreto ou expirado.',
+        code: 'INVALID_PIN',
+        statusCode: 401,
+        timestamp: new Date().toISOString(),
+      });
     }
 
     return reply.status(200).send(authResult);
   });
 
-  // Rota de Sincronização do Clipboard
-  app.post('/api/clipboard', async (request, reply) => {
+  // Rota de Sincronização do Clipboard (protegida com Bearer Token)
+  app.post('/api/clipboard', { preHandler: requireAuth }, async (request, reply) => {
     const parseResult = ClipboardSyncSchema.safeParse(request.body);
     if (!parseResult.success) {
-      return reply.status(400).send({ error: parseResult.error.errors[0].message });
+      return reply.status(400).send({
+        error: parseResult.error.errors[0].message,
+        code: 'VALIDATION_ERROR',
+        statusCode: 400,
+        timestamp: new Date().toISOString(),
+      });
     }
 
     const result = await syncClipboardUseCase.execute(parseResult.data);
     return reply.status(200).send(result);
   });
 
-  // Rota de Upload de Arquivos via Streaming Contínuo
-  app.post('/api/upload', async (request, reply) => {
+  // Rota de Upload de Arquivos via Streaming Contínuo (protegida com Bearer Token)
+  app.post('/api/upload', { preHandler: requireAuth }, async (request, reply) => {
     const data = await request.file();
     if (!data) {
-      return reply.status(400).send({ error: 'Nenhum arquivo enviado no formulário multipart.' });
+      return reply.status(400).send({
+        error: 'Nenhum arquivo enviado no formulário multipart.',
+        code: 'MISSING_FILE',
+        statusCode: 400,
+        timestamp: new Date().toISOString(),
+      });
     }
 
     const filename = data.filename || `orbit-file-${Date.now()}`;
@@ -115,8 +159,10 @@ export function buildServer(dependencies: ServerDependencies): FastifyInstance {
       return reply.status(201).send(output);
     } catch (err: any) {
       return reply.status(422).send({
-        error: 'Falha durante o streaming e gravação do arquivo.',
-        details: err.message,
+        error: err.message || 'Falha durante o streaming e gravação do arquivo.',
+        code: 'STREAM_WRITE_FAILED',
+        statusCode: 422,
+        timestamp: new Date().toISOString(),
       });
     }
   });

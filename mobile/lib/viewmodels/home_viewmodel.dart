@@ -1,8 +1,24 @@
+import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/device.dart';
 import '../services/clipboard_service.dart';
 import '../services/http_upload_service.dart';
 import '../services/web_socket_service.dart';
+
+class ClipboardSyncResult {
+  final bool success;
+  final String? contentType;
+  final String? detectedLanguage;
+  final String? errorMessage;
+
+  const ClipboardSyncResult({
+    required this.success,
+    this.contentType,
+    this.detectedLanguage,
+    this.errorMessage,
+  });
+}
 
 class HomeState {
   final Device? connectedDevice;
@@ -38,6 +54,7 @@ class HomeViewModel extends StateNotifier<HomeState> {
   final WebSocketService _wsService;
   final MobileClipboardService _clipboardService;
   final String deviceId = 'android-${DateTime.now().millisecondsSinceEpoch % 10000}';
+  static const String _storageKey = 'orbit_saved_device';
 
   HomeViewModel({
     required HttpUploadService httpService,
@@ -46,46 +63,110 @@ class HomeViewModel extends StateNotifier<HomeState> {
   })  : _httpService = httpService,
         _wsService = wsService,
         _clipboardService = clipboardService,
-        super(const HomeState());
-
-  void setConnectedDevice(Device device) {
-    state = state.copyWith(connectedDevice: device, statusMessage: 'Conectado a ${device.name}');
-    _wsService.connect(device.wsUrl, deviceId);
+        super(const HomeState()) {
+    loadSavedDevice();
   }
 
-  void disconnect() {
+  Future<void> loadSavedDevice() async {
+    state = state.copyWith(isConnecting: true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_storageKey);
+      if (raw != null && raw.isNotEmpty) {
+        final device = Device.fromJson(jsonDecode(raw));
+
+        // Checa se o PC está online antes de conectar
+        final isOnline = await _httpService.checkHealth(device.baseUrl);
+        if (isOnline) {
+          state = state.copyWith(
+            connectedDevice: device.copyWith(isPaired: true),
+            isConnecting: false,
+            statusMessage: 'Conectado a ${device.name}',
+          );
+          _wsService.connect(device.wsUrl, deviceId);
+        } else {
+          state = state.copyWith(
+            connectedDevice: device.copyWith(isPaired: false),
+            isConnecting: false,
+            statusMessage: 'PC (${device.name}) está offline. Tentando reconectar...',
+          );
+        }
+        return;
+      }
+    } catch (_) {}
+    state = state.copyWith(isConnecting: false);
+  }
+
+  Future<void> setConnectedDevice(Device device) async {
+    state = state.copyWith(
+      connectedDevice: device.copyWith(isPaired: true),
+      statusMessage: 'Conectado a ${device.name}',
+    );
+    _wsService.connect(device.wsUrl, deviceId);
+
+    // Persiste dispositivo pareado
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_storageKey, jsonEncode(device.toJson()));
+    } catch (_) {}
+  }
+
+  Future<void> disconnect() async {
     _wsService.disconnect();
     state = state.copyWith(clearDevice: true, statusMessage: 'Desconectado');
+
+    // Remove persistência
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_storageKey);
+    } catch (_) {}
   }
 
-  Future<bool> syncCurrentClipboard() async {
+  Future<ClipboardSyncResult> syncCurrentClipboard() async {
     final device = state.connectedDevice;
     if (device == null) {
-      state = state.copyWith(statusMessage: 'Nenhum dispositivo conectado!');
-      return false;
+      const msg = 'Nenhum computador conectado!';
+      state = state.copyWith(statusMessage: msg);
+      return const ClipboardSyncResult(success: false, errorMessage: msg);
     }
 
     try {
       final text = await _clipboardService.getSystemClipboardText();
-      if (text.isEmpty) {
-        state = state.copyWith(statusMessage: 'Área de transferência vazia.');
-        return false;
+      if (text.trim().isEmpty) {
+        const msg = 'Área de transferência do celular está vazia.';
+        state = state.copyWith(statusMessage: msg);
+        return const ClipboardSyncResult(success: false, errorMessage: msg);
       }
 
-      await _httpService.sendClipboard(
+      final response = await _httpService.sendClipboard(
         serverBaseUrl: device.baseUrl,
         content: text,
         deviceId: deviceId,
+        token: device.token,
       );
+
+      final data = response.data;
+      final contentType = data is Map ? data['contentType']?.toString() : 'text';
+      final detectedLang = data is Map ? data['detectedLanguage']?.toString() : null;
+
+      final label = contentType != null && contentType != 'text'
+          ? 'Conteúdo [$contentType${detectedLang != null ? ": $detectedLang" : ""}]'
+          : 'Texto';
 
       state = state.copyWith(
         lastSyncedText: text,
-        statusMessage: 'Texto sincronizado com o Linux!',
+        statusMessage: '$label enviado para o Linux com sucesso!',
       );
-      return true;
+
+      return ClipboardSyncResult(
+        success: true,
+        contentType: contentType,
+        detectedLanguage: detectedLang,
+      );
     } catch (e) {
-      state = state.copyWith(statusMessage: 'Falha ao sincronizar clipboard: $e');
-      return false;
+      final errorMsg = HttpUploadService.extractErrorMessage(e);
+      state = state.copyWith(statusMessage: 'Falha: $errorMsg');
+      return ClipboardSyncResult(success: false, errorMessage: errorMsg);
     }
   }
 }

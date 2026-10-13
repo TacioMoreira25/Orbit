@@ -3,8 +3,13 @@ import '../models/transfer_state.dart';
 
 class TransferProgressBar extends StatelessWidget {
   final TransferItem item;
+  final VoidCallback? onRetry;
 
-  const TransferProgressBar({super.key, required this.item});
+  const TransferProgressBar({
+    super.key,
+    required this.item,
+    this.onRetry,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +39,7 @@ class TransferProgressBar extends StatelessWidget {
         break;
       case TransferStatus.failed:
         statusColor = Colors.redAccent;
-        statusText = item.errorMessage ?? 'Falha no envio';
+        statusText = 'Falha no envio';
         break;
     }
 
@@ -44,13 +49,22 @@ class TransferProgressBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF1E2128),
         borderRadius: BorderRadius.circular(12),
+        border: item.status == TransferStatus.failed
+            ? Border.all(color: Colors.redAccent.withValues(alpha: 0.3))
+            : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.insert_drive_file_outlined, color: Colors.cyan, size: 20),
+              Icon(
+                item.status == TransferStatus.failed
+                    ? Icons.error_outline
+                    : Icons.insert_drive_file_outlined,
+                color: item.status == TransferStatus.failed ? Colors.redAccent : Colors.cyan,
+                size: 20,
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -77,6 +91,32 @@ class TransferProgressBar extends StatelessWidget {
               minHeight: 6,
             ),
           ),
+          if (item.status == TransferStatus.failed) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    item.errorMessage ?? 'Ocorreu um erro durante a transferência.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.redAccent.withValues(alpha: 0.9),
+                    ),
+                  ),
+                ),
+                if (onRetry != null)
+                  TextButton.icon(
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh, size: 16, color: Colors.cyan),
+                    label: const Text('Tentar novamente', style: TextStyle(color: Colors.cyan, fontSize: 12)),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+              ],
+            ),
+          ],
         ],
       ),
     );

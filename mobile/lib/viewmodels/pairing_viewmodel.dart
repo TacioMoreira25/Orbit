@@ -73,14 +73,17 @@ class PairingViewModel extends StateNotifier<PairingState> {
       } else {
         state = state.copyWith(
           isLoading: false,
-          errorMessage: response.data['message'] ?? 'Falha ao parear dispositivo.',
+          errorMessage: response.data is Map
+              ? (response.data['error'] ?? response.data['message'] ?? 'Falha ao parear dispositivo.')
+              : 'Falha ao parear dispositivo.',
         );
         return false;
       }
     } catch (e) {
+      final msg = HttpUploadService.extractErrorMessage(e);
       state = state.copyWith(
         isLoading: false,
-        errorMessage: 'Erro ao conectar ao servidor: $e',
+        errorMessage: msg,
       );
       return false;
     }
@@ -115,14 +118,17 @@ class PairingViewModel extends StateNotifier<PairingState> {
       } else {
         state = state.copyWith(
           isLoading: false,
-          errorMessage: response.data['message'] ?? 'PIN inválido.',
+          errorMessage: response.data is Map
+              ? (response.data['error'] ?? response.data['message'] ?? 'PIN inválido ou expirado.')
+              : 'PIN inválido ou expirado.',
         );
         return false;
       }
     } catch (e) {
+      final msg = HttpUploadService.extractErrorMessage(e);
       state = state.copyWith(
         isLoading: false,
-        errorMessage: 'Falha na conexão manual: $e',
+        errorMessage: msg,
       );
       return false;
     }

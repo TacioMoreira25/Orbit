@@ -1,16 +1,187 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../services/share_intent_service.dart';
 import '../viewmodels/home_viewmodel.dart';
 import '../viewmodels/transfer_viewmodel.dart';
 import '../widgets/device_card.dart';
 import 'pairing_screen.dart';
 import 'transfer_screen.dart';
 
-class HomeScreen extends ConsumerWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Inicializa listener do Share Intent para arquivos compartilhados pelo Android
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(shareIntentServiceProvider).initialize(
+        onFilesReceived: (paths) {
+          _handleSharedFiles(paths);
+        },
+      );
+    });
+  }
+
+  void _openPairing(BuildContext context, [int tab = 0]) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => PairingScreen(initialTab: tab)),
+    );
+  }
+
+  void _handleSharedFiles(List<String> paths) {
+    if (paths.isEmpty) return;
+
+    final homeState = ref.read(homeViewModelProvider);
+    if (homeState.connectedDevice == null) {
+      if (!mounted) return;
+      _showConnectPrompt(
+        context,
+        title: 'Arquivos Recebidos',
+        message: 'Você compartilhou ${paths.length} arquivo(s), mas precisa conectar seu PC primeiro para transferir.',
+      );
+      return;
+    }
+
+    // Inicia transferências imediatamente
+    ref.read(transferViewModelProvider.notifier).uploadFromSharedFiles(paths);
+
+    // Navega automaticamente para a tela de progresso
+    if (!mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const TransferScreen()),
+    );
+  }
+
+  void _showConnectPrompt(BuildContext context, {String? title, String? message}) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF16181F),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.cyan.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.phonelink_ring_outlined, color: Colors.cyanAccent, size: 36),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              title ?? 'Conexão Necessária',
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message ?? 'Para enviar arquivos ou sincronizar o clipboard, conecte-se ao Orbit rodando no seu Linux.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.grey, fontSize: 14, height: 1.4),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _openPairing(context, 1);
+                    },
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: Colors.cyan.withValues(alpha: 0.4)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('Inserir IP/PIN', style: TextStyle(color: Colors.cyanAccent)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _openPairing(context, 0);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.cyan,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('Ler QR Code', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _confirmExitApp(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1B1D22),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.logout_rounded, color: Colors.redAccent, size: 24),
+            SizedBox(width: 10),
+            Text('Fechar o Orbit', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: const Text(
+          'Deseja realmente sair e encerrar o aplicativo?',
+          style: TextStyle(color: Colors.grey, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              SystemNavigator.pop();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('Sair do App', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final homeState = ref.watch(homeViewModelProvider);
     final homeNotifier = ref.read(homeViewModelProvider.notifier);
     final isConnected = homeState.connectedDevice != null;
@@ -21,12 +192,15 @@ class HomeScreen extends ConsumerWidget {
         title: Row(
           children: [
             Container(
-              padding: const EdgeInsets.all(6),
-              decoration: const BoxDecoration(
+              padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(
                 color: Colors.cyan,
                 shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(color: Colors.cyan.withValues(alpha: 0.4), blurRadius: 10),
+                ],
               ),
-              child: const Icon(Icons.all_inclusive, color: Colors.black, size: 20),
+              child: const Icon(Icons.all_inclusive, color: Colors.black, size: 18),
             ),
             const SizedBox(width: 12),
             const Text(
@@ -39,50 +213,63 @@ class HomeScreen extends ConsumerWidget {
         elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.history),
-            tooltip: 'Transferências',
+            icon: const Icon(Icons.history_rounded),
+            tooltip: 'Histórico de Transferências',
             onPressed: () {
               Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const TransferScreen()),
               );
             },
           ),
+          IconButton(
+            icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
+            tooltip: 'Sair do Orbit',
+            onPressed: () => _confirmExitApp(context),
+          ),
+          const SizedBox(width: 4),
         ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
+        padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Card de Status do Dispositivo Conectado
             DeviceCard(
               device: homeState.connectedDevice,
-              onConnectPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const PairingScreen()),
-                );
-              },
+              onConnectPressed: () => _openPairing(context, 0),
+              onManualConnectPressed: () => _openPairing(context, 1),
               onDisconnectPressed: () => homeNotifier.disconnect(),
             ),
 
             const SizedBox(height: 28),
 
             // Ações Rápidas
-            const Text(
-              'Ações Rápidas',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+            const Row(
+              children: [
+                Icon(Icons.flash_on_rounded, color: Colors.cyanAccent, size: 20),
+                SizedBox(width: 8),
+                Text(
+                  'Ações Rápidas',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
 
             // Botão Enviar Arquivos
             _buildActionCard(
               context: context,
-              icon: Icons.upload_file,
+              icon: Icons.upload_file_rounded,
               iconColor: Colors.cyanAccent,
               title: 'Enviar Arquivos',
               subtitle: 'Fotos, vídeos e documentos direto para o Linux',
               enabled: isConnected,
               onTap: () {
+                if (!isConnected) {
+                  _showConnectPrompt(context);
+                  return;
+                }
                 ref.read(transferViewModelProvider.notifier).pickAndUploadFiles();
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const TransferScreen()),
@@ -95,49 +282,41 @@ class HomeScreen extends ConsumerWidget {
             // Botão Sincronizar Clipboard
             _buildActionCard(
               context: context,
-              icon: Icons.content_paste_go,
+              icon: Icons.content_paste_go_rounded,
               iconColor: Colors.tealAccent,
               title: 'Sincronizar Clipboard',
               subtitle: 'Envia o texto copiado no celular para o PC agora',
               enabled: isConnected,
               onTap: () async {
-                final success = await homeNotifier.syncCurrentClipboard();
-                if (context.mounted && success) {
+                if (!isConnected) {
+                  _showConnectPrompt(context);
+                  return;
+                }
+                final result = await homeNotifier.syncCurrentClipboard();
+                if (!context.mounted) return;
+                if (result.success) {
+                  final typeLabel = result.contentType != null && result.contentType != 'text'
+                      ? ' [${result.contentType!.toUpperCase()}${result.detectedLanguage != null ? " - ${result.detectedLanguage}" : ""}]'
+                      : '';
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Texto enviado para a área de transferência do Linux!'),
+                    SnackBar(
+                      content: Text('Conteúdo$typeLabel sincronizado com o Linux!'),
                       backgroundColor: Colors.teal,
                       behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(result.errorMessage ?? 'Falha ao sincronizar clipboard.'),
+                      backgroundColor: Colors.redAccent,
+                      behavior: SnackBarBehavior.floating,
+                      duration: const Duration(seconds: 4),
                     ),
                   );
                 }
               },
             ),
-
-            const SizedBox(height: 32),
-
-            // Card de Status do Sistema
-            if (homeState.statusMessage != null)
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1B1D22),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.white10),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.info_outline, size: 18, color: Colors.grey),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        homeState.statusMessage!,
-                        style: const TextStyle(color: Colors.grey, fontSize: 13),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
           ],
         ),
       ),
@@ -154,26 +333,43 @@ class HomeScreen extends ConsumerWidget {
     required VoidCallback onTap,
   }) {
     return InkWell(
-      onTap: enabled ? onTap : null,
-      borderRadius: BorderRadius.circular(16),
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
       child: Container(
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
-          color: enabled ? const Color(0xFF1B1D22) : const Color(0xFF16171B),
-          borderRadius: BorderRadius.circular(16),
+          color: enabled ? const Color(0xFF1B1D24) : const Color(0xFF15161B),
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(
-            color: enabled ? Colors.white12 : Colors.white.withOpacity(0.04),
+            color: enabled
+                ? Colors.white.withValues(alpha: 0.1)
+                : Colors.white.withValues(alpha: 0.04),
           ),
+          boxShadow: enabled
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.25),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ]
+              : null,
         ),
         child: Row(
           children: [
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(13),
               decoration: BoxDecoration(
-                color: enabled ? iconColor.withOpacity(0.12) : Colors.grey.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(12),
+                color: enabled
+                    ? iconColor.withValues(alpha: 0.14)
+                    : Colors.white.withValues(alpha: 0.04),
+                borderRadius: BorderRadius.circular(14),
               ),
-              child: Icon(icon, color: enabled ? iconColor : Colors.grey.withOpacity(0.4), size: 26),
+              child: Icon(
+                icon,
+                color: enabled ? iconColor : Colors.grey.shade600,
+                size: 26,
+              ),
             ),
             const SizedBox(width: 16),
             Expanded(
@@ -185,7 +381,7 @@ class HomeScreen extends ConsumerWidget {
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: enabled ? Colors.white : Colors.grey,
+                      color: enabled ? Colors.white : Colors.grey.shade400,
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -193,15 +389,16 @@ class HomeScreen extends ConsumerWidget {
                     subtitle,
                     style: TextStyle(
                       fontSize: 12,
-                      color: enabled ? Colors.grey : Colors.grey.withOpacity(0.4),
+                      color: enabled ? Colors.grey : Colors.grey.shade600,
                     ),
                   ),
                 ],
               ),
             ),
             Icon(
-              Icons.chevron_right,
-              color: enabled ? Colors.grey : Colors.grey.withOpacity(0.3),
+              enabled ? Icons.chevron_right_rounded : Icons.lock_outline_rounded,
+              color: enabled ? Colors.grey : Colors.grey.shade700,
+              size: enabled ? 24 : 18,
             ),
           ],
         ),

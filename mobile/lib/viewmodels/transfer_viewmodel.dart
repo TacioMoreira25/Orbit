@@ -88,12 +88,12 @@ class TransferViewModel extends StateNotifier<TransferListState> {
     if (device == null) return;
 
     state = state.copyWith(isSelectingFile: true);
-    final result = await FilePicker.platform.pickFiles(allowMultiple: true);
+    final pickedFiles = await FilePicker.pickFiles();
     state = state.copyWith(isSelectingFile: false);
 
-    if (result == null || result.files.isEmpty) return;
+    if (pickedFiles.isEmpty) return;
 
-    for (final pickedFile in result.files) {
+    for (final pickedFile in pickedFiles) {
       if (pickedFile.path == null) continue;
       final file = File(pickedFile.path!);
       final size = await file.length();
@@ -102,6 +102,7 @@ class TransferViewModel extends StateNotifier<TransferListState> {
       final item = TransferItem(
         id: transferId,
         filename: pickedFile.name,
+        filePath: pickedFile.path!,
         totalBytes: size,
         status: TransferStatus.hashing,
         startedAt: DateTime.now(),
@@ -112,6 +113,52 @@ class TransferViewModel extends StateNotifier<TransferListState> {
       // Processa em background
       _executeUpload(transferId, pickedFile.path!, pickedFile.name, size, device.baseUrl, device.token);
     }
+  }
+
+  Future<void> uploadFromSharedFiles(List<String> filePaths) async {
+    final homeState = _ref.read(homeViewModelProvider);
+    final device = homeState.connectedDevice;
+    if (device == null || filePaths.isEmpty) return;
+
+    for (final path in filePaths) {
+      final file = File(path);
+      if (!await file.exists()) continue;
+
+      final filename = path.split(Platform.pathSeparator).last;
+      final size = await file.length();
+      final transferId = 'share-${DateTime.now().millisecondsSinceEpoch}-$filename';
+
+      final item = TransferItem(
+        id: transferId,
+        filename: filename,
+        filePath: path,
+        totalBytes: size,
+        status: TransferStatus.hashing,
+        startedAt: DateTime.now(),
+      );
+
+      state = state.copyWith(transfers: [item, ...state.transfers]);
+      _executeUpload(transferId, path, filename, size, device.baseUrl, device.token);
+    }
+  }
+
+  Future<void> retryTransfer(String transferId) async {
+    final matches = state.transfers.where((t) => t.id == transferId);
+    if (matches.isEmpty) return;
+    final item = matches.first;
+
+    final homeState = _ref.read(homeViewModelProvider);
+    final device = homeState.connectedDevice;
+    if (device == null) return;
+
+    _updateTransfer(transferId, (t) => t.copyWith(
+      status: TransferStatus.hashing,
+      bytesTransferred: 0,
+      percentage: 0.0,
+      errorMessage: null,
+    ));
+
+    _executeUpload(transferId, item.filePath, item.filename, item.totalBytes, device.baseUrl, device.token);
   }
 
   Future<void> _executeUpload(
@@ -159,9 +206,10 @@ class TransferViewModel extends StateNotifier<TransferListState> {
         completedAt: DateTime.now(),
       ));
     } catch (e) {
+      final errorMsg = HttpUploadService.extractErrorMessage(e);
       _updateTransfer(transferId, (i) => i.copyWith(
         status: TransferStatus.failed,
-        errorMessage: e.toString(),
+        errorMessage: errorMsg,
       ));
     }
   }

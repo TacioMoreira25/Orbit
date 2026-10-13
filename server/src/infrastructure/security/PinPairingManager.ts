@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import { PairingSession } from '../../core/entities/PairingSession.js';
 import { ICryptographyService } from '../../core/interfaces/ICryptographyService.js';
 import { IPairingManager } from '../../application/use-cases/AuthenticateDeviceUseCase.js';
@@ -5,11 +8,37 @@ import { IPairingManager } from '../../application/use-cases/AuthenticateDeviceU
 export class PinPairingManager implements IPairingManager {
   private currentSession: PairingSession | null = null;
   private readonly authenticatedTokens = new Set<string>();
+  private readonly tokenStoragePath: string;
 
   constructor(
     private readonly cryptoService: ICryptographyService,
     private readonly expirationSeconds: number = 300
-  ) {}
+  ) {
+    this.tokenStoragePath = path.join(os.homedir(), '.orbit_tokens.json');
+    this.loadPersistedTokens();
+  }
+
+  private loadPersistedTokens(): void {
+    try {
+      if (fs.existsSync(this.tokenStoragePath)) {
+        const raw = fs.readFileSync(this.tokenStoragePath, 'utf-8');
+        const tokens: string[] = JSON.parse(raw);
+        for (const t of tokens) {
+          this.authenticatedTokens.add(t);
+        }
+      }
+    } catch {}
+  }
+
+  private saveTokens(): void {
+    try {
+      fs.writeFileSync(
+        this.tokenStoragePath,
+        JSON.stringify(Array.from(this.authenticatedTokens), null, 2),
+        'utf-8'
+      );
+    } catch {}
+  }
 
   generateNewSession(): PairingSession {
     const pin = this.cryptoService.generatePin();
@@ -53,6 +82,7 @@ export class PinPairingManager implements IPairingManager {
 
     const authorizedToken = this.currentSession.token;
     this.authenticatedTokens.add(authorizedToken);
+    this.saveTokens();
     this.currentSession.isUsed = true;
 
     return { valid: true, token: authorizedToken };
@@ -60,7 +90,8 @@ export class PinPairingManager implements IPairingManager {
 
   isTokenValid(token: string): boolean {
     if (!token) return false;
-    return this.authenticatedTokens.has(token);
+    const cleanToken = token.startsWith('Bearer ') ? token.slice(7).trim() : token.trim();
+    return this.authenticatedTokens.has(cleanToken);
   }
 
   registerPreauthorizedToken(token: string) {
