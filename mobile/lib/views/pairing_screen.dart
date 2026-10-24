@@ -1,7 +1,13 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../services/http_upload_service.dart';
+import '../utils/ip_input_formatter.dart';
+import '../viewmodels/home_viewmodel.dart';
 import '../viewmodels/pairing_viewmodel.dart';
 
 class PairingScreen extends ConsumerStatefulWidget {
@@ -18,15 +24,36 @@ class _PairingScreenState extends ConsumerState<PairingScreen> with SingleTicker
   final _ipController = TextEditingController();
   final _portController = TextEditingController(text: '3000');
   final _pinController = TextEditingController();
+  final _pinFocusNode = FocusNode();
   bool _isProcessingCode = false;
   bool _hasCameraPermission = false;
   bool _isCheckingPermission = true;
+
+  String? _lastConnectedIp;
+  String? _lastConnectedPort;
+  bool _isScanningNetwork = false;
+  String? _discoveredIp;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this, initialIndex: widget.initialTab);
     _checkCameraPermission();
+    _loadLastConnection();
+  }
+
+  Future<void> _loadLastConnection() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ip = prefs.getString('orbit_last_connected_ip');
+      final port = prefs.getString('orbit_last_connected_port');
+      if (ip != null && ip.isNotEmpty && mounted) {
+        setState(() {
+          _lastConnectedIp = ip;
+          _lastConnectedPort = port ?? '3000';
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _checkCameraPermission() async {
@@ -44,12 +71,123 @@ class _PairingScreenState extends ConsumerState<PairingScreen> with SingleTicker
     }
   }
 
+  Future<void> _saveLastConnection(String ip, String port) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('orbit_last_connected_ip', ip);
+      await prefs.setString('orbit_last_connected_port', port);
+    } catch (_) {}
+  }
+
+  Future<void> _pasteIpFromClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final raw = data?.text?.trim() ?? '';
+    if (raw.isEmpty) return;
+
+    // Suporta formatos como: 192.168.1.155, 192.168.1.155:3000 ou http://192.168.1.155:3000
+    final cleaned = raw.replaceAll(RegExp(r'^https?://'), '');
+    final parts = cleaned.split(':');
+    final ipPart = parts[0].replaceAll(RegExp(r'[^0-9.]'), '');
+
+    if (ipPart.isNotEmpty && mounted) {
+      setState(() {
+        _ipController.text = ipPart;
+        if (parts.length > 1) {
+          final portNum = int.tryParse(parts[1].replaceAll(RegExp(r'[^0-9]'), ''));
+          if (portNum != null && portNum > 0 && portNum <= 65535) {
+            _portController.text = portNum.toString();
+          }
+        }
+      });
+      _pinFocusNode.requestFocus();
+    }
+  }
+
+  Future<void> _scanLocalNetwork() async {
+    if (_isScanningNetwork) return;
+    setState(() {
+      _isScanningNetwork = true;
+      _discoveredIp = null;
+    });
+
+    try {
+      // Determina sub-rede provável baseando-se no último IP ou no IP digitado
+      String subnet = '192.168.1';
+      final currentInput = _ipController.text.trim();
+      if (currentInput.contains('.')) {
+        final parts = currentInput.split('.');
+        if (parts.length >= 3) {
+          subnet = '${parts[0]}.${parts[1]}.${parts[2]}';
+        }
+      } else if (_lastConnectedIp != null && _lastConnectedIp!.contains('.')) {
+        final parts = _lastConnectedIp!.split('.');
+        if (parts.length >= 3) {
+          subnet = '${parts[0]}.${parts[1]}.${parts[2]}';
+        }
+      }
+
+      final port = _portController.text.trim().isNotEmpty ? _portController.text.trim() : '3000';
+      final httpService = ref.read(httpUploadServiceProvider);
+
+      // Tenta primeiro o último IP conectado, depois os hosts mais comuns da sub-rede
+      final candidateIps = <String>[];
+      if (_lastConnectedIp != null) candidateIps.add(_lastConnectedIp!);
+      for (int i = 2; i <= 254; i++) {
+        final ip = '$subnet.$i';
+        if (!candidateIps.contains(ip)) candidateIps.add(ip);
+      }
+
+      // Escaneia em lotes de 15 requisições paralelas para resposta ágil
+      String? found;
+      for (int i = 0; i < candidateIps.length; i += 15) {
+        if (!mounted || found != null) break;
+        final batch = candidateIps.sublist(i, (i + 15 < candidateIps.length) ? i + 15 : candidateIps.length);
+        final results = await Future.wait(
+          batch.map((ip) async {
+            final ok = await httpService.checkHealth('http://$ip:$port');
+            return ok ? ip : null;
+          }),
+        );
+        found = results.firstWhere((ip) => ip != null, orElse: () => null);
+        if (found != null) break;
+      }
+
+      if (mounted) {
+        setState(() {
+          _isScanningNetwork = false;
+          _discoveredIp = found;
+        });
+
+        if (found != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Servidor Orbit detectado em $found!'),
+              backgroundColor: Colors.teal,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Nenhum servidor Orbit respondeu na sub-rede atual. Insira o IP manualmente.'),
+              backgroundColor: Colors.orangeAccent,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isScanningNetwork = false);
+    }
+  }
+
   @override
   void dispose() {
     _tabController.dispose();
     _ipController.dispose();
     _portController.dispose();
     _pinController.dispose();
+    _pinFocusNode.dispose();
     super.dispose();
   }
 
@@ -191,6 +329,12 @@ class _PairingScreenState extends ConsumerState<PairingScreen> with SingleTicker
 
                     if (!mounted) return;
                     if (success) {
+                      try {
+                        final data = jsonDecode(rawJson);
+                        final qrIp = data['ip']?.toString();
+                        final qrPort = data['port']?.toString() ?? '3000';
+                        if (qrIp != null) _saveLastConnection(qrIp, qrPort);
+                      } catch (_) {}
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
                           content: Text('Conectado ao Linux com sucesso via QR Code!'),
@@ -242,58 +386,123 @@ class _PairingScreenState extends ConsumerState<PairingScreen> with SingleTicker
           TextField(
             controller: _ipController,
             decoration: InputDecoration(
-              labelText: 'Endereço IP do Linux (ex: 10.0.2.2 ou 192.168.1.10)',
+              labelText: 'Endereço IP do Linux',
+              hintText: '192.168.1.10',
               prefixIcon: const Icon(Icons.wifi, color: Colors.cyan),
-              suffixIcon: _ipController.text.isNotEmpty
-                  ? IconButton(
+              suffixIcon: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_ipController.text.isNotEmpty)
+                    IconButton(
                       icon: const Icon(Icons.clear, size: 18),
+                      tooltip: 'Limpar IP',
                       onPressed: () => setState(() => _ipController.clear()),
-                    )
-                  : null,
+                    ),
+                  IconButton(
+                    icon: const Icon(Icons.content_paste_rounded, size: 18, color: Colors.cyan),
+                    tooltip: 'Colar IP copiado',
+                    onPressed: _pasteIpFromClipboard,
+                  ),
+                  const SizedBox(width: 4),
+                ],
+              ),
               filled: true,
               fillColor: const Color(0xFF1B1D22),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
-            keyboardType: TextInputType.url,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [IpAddressInputFormatter()],
+            textInputAction: TextInputAction.next,
             onChanged: (_) => setState(() {}),
           ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            children: [
-              ActionChip(
-                avatar: const Icon(Icons.phone_android, size: 14, color: Colors.cyan),
-                label: const Text('Emulador (10.0.2.2)', style: TextStyle(fontSize: 12)),
-                backgroundColor: const Color(0xFF1E2128),
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
-                onPressed: () => setState(() => _ipController.text = '10.0.2.2'),
+          if (_discoveredIp != null) ...[
+            const SizedBox(height: 10),
+            InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () {
+                setState(() => _ipController.text = _discoveredIp!);
+                _pinFocusNode.requestFocus();
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.teal.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.tealAccent.withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle_outline, color: Colors.tealAccent, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'PC Orbit detectado: $_discoveredIp (Toque para usar)',
+                        style: const TextStyle(color: Colors.tealAccent, fontSize: 13, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              ActionChip(
-                avatar: const Icon(Icons.computer, size: 14, color: Colors.cyan),
-                label: const Text('Localhost (127.0.0.1)', style: TextStyle(fontSize: 12)),
-                backgroundColor: const Color(0xFF1E2128),
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
-                onPressed: () => setState(() => _ipController.text = '127.0.0.1'),
+            ),
+          ] else if (_lastConnectedIp != null) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: ActionChip(
+                avatar: const Icon(Icons.history_rounded, size: 16, color: Colors.cyanAccent),
+                label: Text('Último: $_lastConnectedIp', style: const TextStyle(fontSize: 12, color: Colors.cyanAccent)),
+                backgroundColor: const Color(0xFF1B1D22),
+                side: BorderSide(color: Colors.cyan.withValues(alpha: 0.25)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                onPressed: () {
+                  setState(() {
+                    _ipController.text = _lastConnectedIp!;
+                    if (_lastConnectedPort != null) _portController.text = _lastConnectedPort!;
+                  });
+                  _pinFocusNode.requestFocus();
+                },
               ),
-            ],
+            ),
+          ],
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: _isScanningNetwork ? null : _scanLocalNetwork,
+              icon: _isScanningNetwork
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.cyan),
+                    )
+                  : const Icon(Icons.radar_rounded, size: 18, color: Colors.cyan),
+              label: Text(
+                _isScanningNetwork ? 'Buscando servidor Orbit na rede...' : 'Buscar PC na rede local',
+                style: const TextStyle(color: Colors.cyan, fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 10),
           TextField(
             controller: _portController,
             decoration: InputDecoration(
-              labelText: 'Porta (Padrão: 3000)',
+              labelText: 'Porta',
+              hintText: 'Padrão: 3000',
               prefixIcon: const Icon(Icons.numbers, color: Colors.cyan),
               filled: true,
               fillColor: const Color(0xFF1B1D22),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
             keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(5)],
           ),
           const SizedBox(height: 16),
           TextField(
             controller: _pinController,
+            focusNode: _pinFocusNode,
             decoration: InputDecoration(
-              labelText: 'PIN de 4 dígitos (exibido no terminal)',
+              labelText: 'PIN de 4 dígitos',
+              hintText: 'Exibido no terminal do PC',
               prefixIcon: const Icon(Icons.lock_outline, color: Colors.cyan),
               filled: true,
               fillColor: const Color(0xFF1B1D22),
@@ -301,6 +510,7 @@ class _PairingScreenState extends ConsumerState<PairingScreen> with SingleTicker
             ),
             maxLength: 4,
             keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           ),
           const SizedBox(height: 24),
           if (pairingState.errorMessage != null) ...[
@@ -379,6 +589,7 @@ class _PairingScreenState extends ConsumerState<PairingScreen> with SingleTicker
 
               if (!mounted) return;
               if (success) {
+                _saveLastConnection(ip, port.toString());
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text('Conectado ao Linux com sucesso!'),

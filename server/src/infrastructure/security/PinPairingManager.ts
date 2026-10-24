@@ -12,9 +12,10 @@ export class PinPairingManager implements IPairingManager {
 
   constructor(
     private readonly cryptoService: ICryptographyService,
-    private readonly expirationSeconds: number = 300
+    private readonly expirationSeconds: number = 300,
+    storagePath?: string
   ) {
-    this.tokenStoragePath = path.join(os.homedir(), '.orbit_tokens.json');
+    this.tokenStoragePath = storagePath || path.join(os.homedir(), '.orbit_tokens.json');
     this.loadPersistedTokens();
   }
 

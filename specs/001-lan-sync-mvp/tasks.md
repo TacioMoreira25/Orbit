@@ -21,12 +21,12 @@
 | **T-10** | Smart Clipboard com injeção no Linux | RF-07, US3 | T-06 | `POST /api/clipboard` classifica e injeta no X11/Wayland | [x] Concluído |
 | **T-11** | App Flutter base com Riverpod e Dark Theme | Constituição | T-01 | App renderiza tela inicial limpa com tema escuro | [x] Concluído |
 | **T-12** | Scanner de QR Code com câmera no celular | RF-02, US1 | T-11 | Câmera decodifica JSON e preenche IP/porta/PIN automaticamente | [x] Concluído |
-| **T-13** | Formulário manual de conexão com IP e PIN | RF-03, US1 | T-11 | Campos com atalho para emulador (`10.0.2.2`) e PIN | [x] Concluído |
+| **T-13** | Formulário manual de conexão com IP e PIN | RF-03, US1 | T-11 | Campos de IP (com formatação automática), porta e PIN | [x] Concluído |
 | **T-14** | Banner explícito de erro para PIN incorreto | RF-10, US1 | T-13 | PIN errado exibe card vermelho e fecha teclado virtual | [x] Concluído |
 | **T-15** | Botão padrão de logout/sair com diálogo | Constituição | T-11 | Ícone padrão de porta com diálogo de encerramento do app | [x] Concluído |
 | **T-16** | Persistência local e auto-reconexão no Mobile | RF-08, US5 | T-13 | App reabre e restaura sessão ativa via `GET /health` | [x] Concluído |
 | **T-17** | Integração com Share Sheet nativo do Android | RF-09, US4 | T-11 | Compartilhar arquivo de outros apps envia para o Orbit | [x] Concluído |
 | **T-18** | Barra de progresso visual e botão de tentar novamente | RF-04, US2 | T-17 | Card exibe barra fluida e botão Retry em falha | [x] Concluído |
 | **T-19** | Result Pattern canônico no core do Backend e Mobile | Constituição | T-04 | Use Cases e ViewModels usam tipo Result sem throws | [x] Concluído |
-| **T-20** | Testes automatizados de integração do Backend | Constituição | T-04, T-07 | Testes cobrem `/health`, `/api/pair` e stream de upload | [ ] Pendente |
-| **T-21** | Testes unitários com `flutter_test` para ViewModels | Constituição | T-14, T-16 | Testes cobrem `PairingViewModel` e `HomeViewModel` | [ ] Pendente |
+| **T-20** | Testes automatizados de integração do Backend | Constituição | T-04, T-07 | Testes cobrem `/health`, `/api/pair` e stream de upload | [x] Concluído |
+| **T-21** | Testes unitários com `flutter_test` para ViewModels | Constituição | T-14, T-16 | Testes cobrem `PairingViewModel` e `HomeViewModel` | [x] Concluído |
