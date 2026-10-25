@@ -241,6 +241,7 @@ describe('Orbit Backend Integration Tests', () => {
     assert.strictEqual(res.statusCode, 422);
     const body = JSON.parse(res.body);
     assert.strictEqual(body.code, 'STREAM_WRITE_FAILED');
+    assert.strictEqual(fs.existsSync(path.join(tempDir, 'corrupted-test.txt')), false);
   });
 
   test('POST /api/clipboard - syncs text and applies classification', async () => {
@@ -263,5 +264,79 @@ describe('Orbit Backend Integration Tests', () => {
     const body = JSON.parse(res.body);
     assert.strictEqual(body.contentType, 'url');
     assert.strictEqual(body.appliedToSystemClipboard, true);
+  });
+
+  test('POST /api/local/pin - returns active PIN and QR Code payload for localhost CLI', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/local/pin',
+      remoteAddress: '127.0.0.1',
+      payload: { refresh: false },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.strictEqual(body.pin, activePin);
+    assert.strictEqual(body.token, validToken);
+    assert.strictEqual(body.deviceName, 'Test-Orbit-PC');
+  });
+
+  test('GET / - serves Web Dashboard HTML UI', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/',
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.ok(res.headers['content-type']?.toString().includes('text/html'));
+    assert.ok(res.body.includes('Orbit Linux Dashboard'));
+  });
+
+  test('POST /api/share-to-mobile and GET /api/download/:fileId - shares file and supports HTTP Range streaming', async () => {
+    const boundary = '----OrbitShareBoundary999';
+    const fileContent = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const multipartBody = [
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="file"; filename="pc-to-mobile.txt"',
+      'Content-Type: text/plain',
+      '',
+      fileContent,
+      `--${boundary}--`,
+      '',
+    ].join('\r\n');
+
+    const shareRes = await app.inject({
+      method: 'POST',
+      url: '/api/share-to-mobile',
+      remoteAddress: '127.0.0.1',
+      headers: {
+        'content-type': `multipart/form-data; boundary=${boundary}`,
+      },
+      payload: multipartBody,
+    });
+
+    assert.strictEqual(shareRes.statusCode, 201);
+    const sharedMeta = JSON.parse(shareRes.body);
+    assert.ok(sharedMeta.fileId);
+    assert.strictEqual(sharedMeta.sizeBytes, Buffer.byteLength(fileContent));
+
+    // Full download
+    const dlRes = await app.inject({
+      method: 'GET',
+      url: `/api/download/${sharedMeta.fileId}`,
+    });
+    assert.strictEqual(dlRes.statusCode, 200);
+    assert.strictEqual(dlRes.body, fileContent);
+
+    // Partial HTTP Range download (bytes 0-9 -> '0123456789')
+    const rangeRes = await app.inject({
+      method: 'GET',
+      url: `/api/download/${sharedMeta.fileId}`,
+      headers: {
+        range: 'bytes=0-9',
+      },
+    });
+    assert.strictEqual(rangeRes.statusCode, 206);
+    assert.strictEqual(rangeRes.body, '0123456789');
   });
 });
