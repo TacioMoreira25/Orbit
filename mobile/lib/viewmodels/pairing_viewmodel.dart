@@ -39,17 +39,16 @@ class PairingViewModel extends StateNotifier<PairingState> {
         _ref = ref,
         super(const PairingState());
 
-  Future<bool> pairWithQrCodePayload(String qrJson) async {
+  Future<bool> _authenticateAndConnect({
+    required String ip,
+    required int port,
+    required String pin,
+    String? fallbackServerName,
+    String? fallbackToken,
+  }) async {
     state = state.copyWith(isLoading: true, errorMessage: null);
 
     try {
-      final data = jsonDecode(qrJson);
-      final ip = data['ip'] as String;
-      final port = (data['port'] as num).toInt();
-      final pin = data['pin'] as String;
-      final serverName = data['deviceName'] as String? ?? 'Linux PC';
-      final token = data['token'] as String?;
-
       final response = await _httpService.pairDevice(
         serverBaseUrl: 'http://$ip:$port',
         pin: pin,
@@ -57,7 +56,9 @@ class PairingViewModel extends StateNotifier<PairingState> {
       );
 
       if (response.statusCode == 200 && response.data['success'] == true) {
-        final authorizedToken = response.data['token'] ?? token;
+        final serverName = response.data['serverDeviceName'] as String? ?? fallbackServerName ?? 'Linux PC';
+        final authorizedToken = response.data['token'] as String? ?? fallbackToken;
+
         final pairedDevice = Device(
           id: 'linux-server',
           name: serverName,
@@ -74,8 +75,8 @@ class PairingViewModel extends StateNotifier<PairingState> {
         state = state.copyWith(
           isLoading: false,
           errorMessage: response.data is Map
-              ? (response.data['error'] ?? response.data['message'] ?? 'Falha ao parear dispositivo.')
-              : 'Falha ao parear dispositivo.',
+              ? (response.data['error'] ?? response.data['message'] ?? 'PIN incorreto ou expirado.')
+              : 'PIN incorreto ou expirado.',
         );
         return false;
       }
@@ -89,41 +90,22 @@ class PairingViewModel extends StateNotifier<PairingState> {
     }
   }
 
-  Future<bool> pairWithManualInput(String ip, int port, String pin) async {
-    state = state.copyWith(isLoading: true, errorMessage: null);
-
+  Future<bool> pairWithQrCodePayload(String qrJson) async {
     try {
-      final response = await _httpService.pairDevice(
-        serverBaseUrl: 'http://$ip:$port',
+      final data = jsonDecode(qrJson);
+      final ip = data['ip'] as String;
+      final port = (data['port'] as num).toInt();
+      final pin = data['pin'] as String;
+      final serverName = data['deviceName'] as String?;
+      final token = data['token'] as String?;
+
+      return await _authenticateAndConnect(
+        ip: ip,
+        port: port,
         pin: pin,
-        deviceName: 'Android Device',
+        fallbackServerName: serverName,
+        fallbackToken: token,
       );
-
-      if (response.statusCode == 200 && response.data['success'] == true) {
-        final token = response.data['token'];
-        final serverName = response.data['serverDeviceName'] ?? 'Linux PC';
-
-        final pairedDevice = Device(
-          id: 'linux-server',
-          name: serverName,
-          host: ip,
-          port: port,
-          token: token,
-          isPaired: true,
-        );
-
-        _ref.read(homeViewModelProvider.notifier).setConnectedDevice(pairedDevice);
-        state = state.copyWith(isLoading: false, isSuccess: true);
-        return true;
-      } else {
-        state = state.copyWith(
-          isLoading: false,
-          errorMessage: response.data is Map
-              ? (response.data['error'] ?? response.data['message'] ?? 'PIN inválido ou expirado.')
-              : 'PIN inválido ou expirado.',
-        );
-        return false;
-      }
     } catch (e) {
       final msg = HttpUploadService.extractErrorMessage(e);
       state = state.copyWith(
@@ -132,6 +114,14 @@ class PairingViewModel extends StateNotifier<PairingState> {
       );
       return false;
     }
+  }
+
+  Future<bool> pairWithManualInput(String ip, int port, String pin) async {
+    return await _authenticateAndConnect(
+      ip: ip,
+      port: port,
+      pin: pin,
+    );
   }
 }
 
