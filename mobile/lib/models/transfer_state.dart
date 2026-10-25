@@ -5,6 +5,7 @@ enum TransferStatus {
   verifying,
   completed,
   failed,
+  cancelled,
 }
 
 class TransferItem {
@@ -14,6 +15,8 @@ class TransferItem {
   final int totalBytes;
   final int bytesTransferred;
   final double percentage;
+  final double speedBytesPerSec;
+  final int? etaSeconds;
   final TransferStatus status;
   final String? errorMessage;
   final DateTime startedAt;
@@ -26,6 +29,8 @@ class TransferItem {
     required this.totalBytes,
     this.bytesTransferred = 0,
     this.percentage = 0.0,
+    this.speedBytesPerSec = 0.0,
+    this.etaSeconds,
     this.status = TransferStatus.idle,
     this.errorMessage,
     required this.startedAt,
@@ -39,6 +44,8 @@ class TransferItem {
     int? totalBytes,
     int? bytesTransferred,
     double? percentage,
+    double? speedBytesPerSec,
+    int? etaSeconds,
     TransferStatus? status,
     String? errorMessage,
     DateTime? startedAt,
@@ -51,6 +58,8 @@ class TransferItem {
       totalBytes: totalBytes ?? this.totalBytes,
       bytesTransferred: bytesTransferred ?? this.bytesTransferred,
       percentage: percentage ?? this.percentage,
+      speedBytesPerSec: speedBytesPerSec ?? this.speedBytesPerSec,
+      etaSeconds: etaSeconds ?? this.etaSeconds,
       status: status ?? this.status,
       errorMessage: errorMessage ?? this.errorMessage,
       startedAt: startedAt ?? this.startedAt,

@@ -17,27 +17,28 @@ class DeviceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isConnected = device != null;
+    final hasSavedDevice = device != null;
+    final isOnline = device != null && device!.isPaired;
 
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
         gradient: LinearGradient(
-          colors: isConnected
+          colors: isOnline
               ? [const Color(0xFF132A36), const Color(0xFF101C24)]
               : [const Color(0xFF1D2027), const Color(0xFF15171C)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         border: Border.all(
-          color: isConnected
+          color: isOnline
               ? Colors.cyan.withValues(alpha: 0.4)
               : Colors.white.withValues(alpha: 0.08),
           width: 1.5,
         ),
         boxShadow: [
           BoxShadow(
-            color: isConnected
+            color: isOnline
                 ? Colors.cyan.withValues(alpha: 0.08)
                 : Colors.black.withValues(alpha: 0.3),
             blurRadius: 16,
@@ -54,14 +55,14 @@ class DeviceCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: isConnected
+                    color: isOnline
                         ? Colors.cyan.withValues(alpha: 0.18)
                         : Colors.white.withValues(alpha: 0.05),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
-                    isConnected ? Icons.laptop_chromebook : Icons.phonelink_off_rounded,
-                    color: isConnected ? Colors.cyanAccent : Colors.grey.shade400,
+                    isOnline ? Icons.laptop_chromebook : Icons.phonelink_off_rounded,
+                    color: isOnline ? Colors.cyanAccent : Colors.grey.shade400,
                     size: 26,
                   ),
                 ),
@@ -71,7 +72,7 @@ class DeviceCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        isConnected ? device!.name : 'Nenhum PC conectado',
+                        hasSavedDevice ? device!.name : 'Nenhum PC conectado',
                         style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
@@ -81,12 +82,14 @@ class DeviceCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        isConnected
-                            ? '${device!.host}:${device!.port}'
+                        hasSavedDevice
+                            ? (isOnline
+                                ? '${device!.host}:${device!.port}'
+                                : '${device!.host}:${device!.port} (PC desligado ou fora da rede)')
                             : 'Pareie com seu Linux para sincronizar',
                         style: TextStyle(
                           fontSize: 13,
-                          color: isConnected ? Colors.cyanAccent.withValues(alpha: 0.85) : Colors.grey,
+                          color: isOnline ? Colors.cyanAccent.withValues(alpha: 0.85) : Colors.grey,
                         ),
                       ),
                     ],
@@ -95,12 +98,12 @@ class DeviceCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: isConnected
+                    color: isOnline
                         ? Colors.greenAccent.withValues(alpha: 0.15)
                         : Colors.redAccent.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: isConnected
+                      color: isOnline
                           ? Colors.greenAccent.withValues(alpha: 0.5)
                           : Colors.redAccent.withValues(alpha: 0.5),
                     ),
@@ -113,16 +116,16 @@ class DeviceCard extends StatelessWidget {
                         height: 7,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: isConnected ? Colors.greenAccent : Colors.redAccent,
+                          color: isOnline ? Colors.greenAccent : Colors.redAccent,
                         ),
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        isConnected ? 'Online' : 'Offline',
+                        isOnline ? 'Online' : 'Offline',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
-                          color: isConnected ? Colors.greenAccent : Colors.redAccent,
+                          color: isOnline ? Colors.greenAccent : Colors.redAccent,
                         ),
                       ),
                     ],
@@ -131,7 +134,7 @@ class DeviceCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 18),
-            if (isConnected)
+            if (hasSavedDevice)
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import '../models/file_payload.dart';
@@ -38,7 +39,7 @@ class HttpUploadService {
           }
           return 'Erro no servidor (${error.response?.statusCode}): ${error.response?.statusMessage ?? 'Falha desconhecida'}';
         case DioExceptionType.cancel:
-          return 'Operação cancelada.';
+          return 'Transferência cancelada pelo usuário.';
         default:
           return 'Erro de comunicação de rede: ${error.message ?? 'Desconhecido'}';
       }
@@ -50,18 +51,31 @@ class HttpUploadService {
     try {
       final response = await _dio.get(
         '$serverBaseUrl/health',
-        options: Options(receiveTimeout: const Duration(seconds: 3)),
+        options: Options(
+          sendTimeout: const Duration(seconds: 2),
+          receiveTimeout: const Duration(seconds: 2),
+        ),
       );
-      return response.statusCode == 200;
+      if (response.statusCode == 200) {
+        final data = response.data;
+        if (data is Map) {
+          return data['status'] == 'ok';
+        }
+        return true;
+      }
+      return false;
     } catch (_) {
       return false;
     }
   }
 
+  /// Calcula o SHA-256 em um Isolate separado para nunca travar a UI de 120Hz em arquivos de múltiplos GBs
   Future<String> calculateSha256(String filePath) async {
-    final file = File(filePath);
-    final output = await sha256.bind(file.openRead()).first;
-    return output.toString();
+    return await Isolate.run(() async {
+      final file = File(filePath);
+      final output = await sha256.bind(file.openRead()).first;
+      return output.toString();
+    });
   }
 
   Future<Response> uploadFile({
@@ -69,6 +83,7 @@ class HttpUploadService {
     required FilePayload payload,
     required String deviceId,
     String? token,
+    CancelToken? cancelToken,
     void Function(int sentBytes, int totalBytes)? onProgress,
   }) async {
     final file = File(payload.path);
@@ -82,6 +97,7 @@ class HttpUploadService {
     });
 
     final headers = <String, dynamic>{
+      'x-transfer-id': payload.id,
       'x-device-id': deviceId,
       'x-file-size': payload.sizeBytes.toString(),
     };
@@ -97,6 +113,7 @@ class HttpUploadService {
     return await _dio.post(
       '$serverBaseUrl/api/upload',
       data: formData,
+      cancelToken: cancelToken,
       options: Options(
         headers: headers,
         receiveTimeout: const Duration(minutes: 10), // Permite arquivos grandes
@@ -139,5 +156,52 @@ class HttpUploadService {
       },
       options: Options(headers: headers),
     );
+  }
+
+  Future<Response> downloadFile({
+    required String downloadUrl,
+    required String savePath,
+    String? token,
+    CancelToken? cancelToken,
+    void Function(int receivedBytes, int totalBytes)? onProgress,
+  }) async {
+    final headers = <String, dynamic>{};
+    if (token != null) {
+      headers['authorization'] = 'Bearer $token';
+    }
+
+    return await _dio.download(
+      downloadUrl,
+      savePath,
+      cancelToken: cancelToken,
+      options: Options(
+        headers: headers,
+        receiveTimeout: const Duration(minutes: 10),
+      ),
+      onReceiveProgress: onProgress,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> fetchSharedFiles({
+    required String serverBaseUrl,
+    String? token,
+  }) async {
+    try {
+      final headers = <String, dynamic>{};
+      if (token != null) {
+        headers['authorization'] = 'Bearer $token';
+      }
+      final response = await _dio.get(
+        '$serverBaseUrl/api/files',
+        options: Options(headers: headers),
+      );
+      final data = response.data;
+      if (data is Map && data['files'] is List) {
+        return List<Map<String, dynamic>>.from(
+          (data['files'] as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)),
+        );
+      }
+    } catch (_) {}
+    return const [];
   }
 }

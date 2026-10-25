@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -55,6 +56,8 @@ class HomeViewModel extends StateNotifier<HomeState> {
   final MobileClipboardService _clipboardService;
   final String deviceId = 'android-${DateTime.now().millisecondsSinceEpoch % 10000}';
   static const String _storageKey = 'orbit_saved_device';
+  StreamSubscription? _wsSubscription;
+  Timer? _healthCheckTimer;
 
   HomeViewModel({
     required HttpUploadService httpService,
@@ -64,7 +67,56 @@ class HomeViewModel extends StateNotifier<HomeState> {
         _wsService = wsService,
         _clipboardService = clipboardService,
         super(const HomeState()) {
+    _listenIncomingEvents();
     loadSavedDevice();
+    _startPeriodicHealthCheck();
+  }
+
+  @override
+  void dispose() {
+    _healthCheckTimer?.cancel();
+    _wsSubscription?.cancel();
+    super.dispose();
+  }
+
+  void _startPeriodicHealthCheck() {
+    _healthCheckTimer?.cancel();
+    _healthCheckTimer = Timer.periodic(const Duration(seconds: 4), (_) async {
+      final device = state.connectedDevice;
+      if (device == null) return;
+
+      final isOnline = await _httpService.checkHealth(device.baseUrl);
+      if (isOnline && !device.isPaired) {
+        state = state.copyWith(
+          connectedDevice: device.copyWith(isPaired: true),
+          statusMessage: 'Conectado a ${device.name}',
+        );
+        _wsService.connect(device.wsUrl, deviceId);
+      } else if (!isOnline && device.isPaired) {
+        state = state.copyWith(
+          connectedDevice: device.copyWith(isPaired: false),
+          statusMessage: 'PC (${device.name}) está offline.',
+        );
+      }
+    });
+  }
+
+  void _listenIncomingEvents() {
+    _wsSubscription = _wsService.messages.listen((msg) async {
+      final type = msg['type'];
+      final payload = msg['payload'];
+      if (type == 'CLIPBOARD_RECEIVED' && payload is Map) {
+        final sender = payload['senderDeviceId']?.toString();
+        final content = payload['content']?.toString();
+        if (sender != deviceId && content != null && content.isNotEmpty) {
+          await _clipboardService.setSystemClipboardText(content);
+          state = state.copyWith(
+            lastSyncedText: content,
+            statusMessage: 'Clipboard recebido do Linux e copiado no celular!',
+          );
+        }
+      }
+    });
   }
 
   Future<void> loadSavedDevice() async {

@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/transfer_state.dart';
 import '../services/share_intent_service.dart';
 import '../viewmodels/home_viewmodel.dart';
 import '../viewmodels/transfer_viewmodel.dart';
 import '../widgets/device_card.dart';
+import '../widgets/transfer_progress_bar.dart';
 import 'pairing_screen.dart';
-import 'transfer_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -15,10 +16,11 @@ class HomeScreen extends ConsumerStatefulWidget {
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends ConsumerState<HomeScreen> {
+class _HomeScreenState extends ConsumerState<HomeScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Inicializa listener do Share Intent para arquivos compartilhados pelo Android
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(shareIntentServiceProvider).initialize(
@@ -26,7 +28,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           _handleSharedFiles(paths);
         },
       );
+      ref.read(transferViewModelProvider.notifier).checkPendingFilesFromPc();
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Reconecta e puxa arquivos pendentes assim que o usuário volta para o app
+      final homeState = ref.read(homeViewModelProvider);
+      if (homeState.connectedDevice != null) {
+        ref.read(transferViewModelProvider.notifier).checkPendingFilesFromPc();
+      }
+    }
   }
 
   void _openPairing(BuildContext context, [int tab = 0]) {
@@ -49,14 +69,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       return;
     }
 
-    // Inicia transferências imediatamente
+    // Inicia transferências imediatamente na própria tela inicial
     ref.read(transferViewModelProvider.notifier).uploadFromSharedFiles(paths);
-
-    // Navega automaticamente para a tela de progresso
-    if (!mounted) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const TransferScreen()),
-    );
   }
 
   void _showConnectPrompt(BuildContext context, {String? title, String? message}) {
@@ -80,13 +94,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
             ),
             const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.cyan.withValues(alpha: 0.12),
-                shape: BoxShape.circle,
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Image.asset(
+                'assets/images/orbit_logo.png',
+                width: 68,
+                height: 68,
+                fit: BoxFit.contain,
               ),
-              child: const Icon(Icons.phonelink_ring_outlined, color: Colors.cyanAccent, size: 36),
             ),
             const SizedBox(height: 16),
             Text(
@@ -184,23 +199,57 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     final homeState = ref.watch(homeViewModelProvider);
     final homeNotifier = ref.read(homeViewModelProvider.notifier);
-    final isConnected = homeState.connectedDevice != null;
+    final transferState = ref.watch(transferViewModelProvider);
+    final transferNotifier = ref.read(transferViewModelProvider.notifier);
+    final transfers = transferState.transfers;
+    final isConnected = homeState.connectedDevice != null && homeState.connectedDevice!.isPaired;
+
+    ref.listen<HomeState>(homeViewModelProvider, (prev, next) {
+      if (next.statusMessage != null &&
+          next.statusMessage != prev?.statusMessage &&
+          next.statusMessage!.contains('recebido do Linux')) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(next.statusMessage!),
+            backgroundColor: Colors.teal,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      if (prev?.connectedDevice == null && next.connectedDevice != null) {
+        transferNotifier.checkPendingFilesFromPc();
+      }
+    });
+
+    ref.listen<TransferListState>(transferViewModelProvider, (prev, next) {
+      final prevCount = prev?.transfers.length ?? 0;
+      if (next.transfers.length > prevCount) {
+        final newest = next.transfers.first;
+        if (newest.id.startsWith('download-')) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Recebendo arquivo do PC: ${newest.filename}'),
+              backgroundColor: Colors.cyan.shade700,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    });
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F1115),
       appBar: AppBar(
         title: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(7),
-              decoration: BoxDecoration(
-                color: Colors.cyan,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(color: Colors.cyan.withValues(alpha: 0.4), blurRadius: 10),
-                ],
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.asset(
+                'assets/images/orbit_logo.png',
+                width: 32,
+                height: 32,
+                fit: BoxFit.contain,
               ),
-              child: const Icon(Icons.all_inclusive, color: Colors.black, size: 18),
             ),
             const SizedBox(width: 12),
             const Text(
@@ -212,15 +261,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.history_rounded),
-            tooltip: 'Histórico de Transferências',
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const TransferScreen()),
-              );
-            },
-          ),
           IconButton(
             icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
             tooltip: 'Sair do Orbit',
@@ -270,10 +310,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   _showConnectPrompt(context);
                   return;
                 }
-                ref.read(transferViewModelProvider.notifier).pickAndUploadFiles();
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const TransferScreen()),
-                );
+                transferNotifier.pickAndUploadFiles();
               },
             ),
 
@@ -317,6 +354,41 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 }
               },
             ),
+
+            if (transfers.isNotEmpty) ...[
+              const SizedBox(height: 28),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.swap_vert_rounded, color: Colors.cyanAccent, size: 20),
+                      SizedBox(width: 8),
+                      Text(
+                        'Transferências da Sessão',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
+                    ],
+                  ),
+                  TextButton(
+                    onPressed: () => transferNotifier.clearFinishedTransfers(),
+                    child: const Text('Limpar concluídas', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              ...transfers.map(
+                (item) => TransferProgressBar(
+                  item: item,
+                  onRetry: (item.status == TransferStatus.failed || item.status == TransferStatus.cancelled)
+                      ? () => transferNotifier.retryTransfer(item.id)
+                      : null,
+                  onCancel: (item.status == TransferStatus.uploading || item.status == TransferStatus.hashing)
+                      ? () => transferNotifier.cancelTransfer(item.id)
+                      : null,
+                ),
+              ),
+            ],
           ],
         ),
       ),
