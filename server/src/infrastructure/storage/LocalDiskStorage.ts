@@ -32,9 +32,10 @@ export class LocalDiskStorage implements IStorageService {
   }
 
   private getUniqueFilePath(filename: string): string {
-    const ext = path.extname(filename);
-    const basename = path.basename(filename, ext);
-    let candidatePath = path.join(this.targetDirectory, filename);
+    const safeFilename = path.basename(filename).replace(/[\x00-\x1f]/g, '') || `orbit-file-${Date.now()}`;
+    const ext = path.extname(safeFilename);
+    const basename = path.basename(safeFilename, ext);
+    let candidatePath = path.join(this.targetDirectory, safeFilename);
     let counter = 1;
 
     while (fs.existsSync(candidatePath)) {
@@ -43,6 +44,14 @@ export class LocalDiskStorage implements IStorageService {
     }
 
     return candidatePath;
+  }
+
+  async deleteFile(filePath: string): Promise<void> {
+    if (fs.existsSync(filePath)) {
+      try {
+        await fs.promises.unlink(filePath);
+      } catch {}
+    }
   }
 
   async saveStream(
@@ -75,6 +84,13 @@ export class LocalDiskStorage implements IStorageService {
 
     try {
       await pipeline(stream, spyTransform, writeStream);
+
+      if (options?.totalBytes && bytesWritten < options.totalBytes) {
+        throw new Error(
+          `Conexão interrompida prematuramente (${bytesWritten} de ${options.totalBytes} bytes recebidos).`
+        );
+      }
+
       const calculatedHashSha256 = hashStream.digest('hex');
 
       return {
@@ -83,12 +99,8 @@ export class LocalDiskStorage implements IStorageService {
         calculatedHashSha256,
       };
     } catch (error) {
-      // Se falhou no meio da transferência, limpa o arquivo corrompido do disco
-      if (fs.existsSync(targetFilePath)) {
-        try {
-          await fs.promises.unlink(targetFilePath);
-        } catch {}
-      }
+      // Se falhou ou caiu a conexão no meio da transferência, limpa o arquivo incompleto do disco
+      await this.deleteFile(targetFilePath);
       throw error;
     }
   }

@@ -1,3 +1,8 @@
 export interface INotificationService {
-  notify(title: string, message: string, urgency?: 'low' | 'normal' | 'critical'): Promise<void>;
+  notify(
+    title: string,
+    message: string,
+    urgency?: 'low' | 'normal' | 'critical',
+    actionOpenPath?: string
+  ): Promise<void>;
 }

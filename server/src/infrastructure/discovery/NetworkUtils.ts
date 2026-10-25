@@ -6,11 +6,14 @@ export class NetworkUtils {
 
     // Prioriza interfaces comuns de Wi-Fi e Ethernet (wlan0, wlp*, eth0, enp*)
     const prioritizedPrefixes = ['wl', 'eth', 'en'];
+    // Ignora interfaces virtuais (Docker, bridges, VPNs, VMs)
+    const ignoredPrefixes = ['docker', 'br-', 'veth', 'virbr', 'tun', 'tap', 'vboxnet', 'vmnet'];
 
     const candidates: Array<{ ip: string; priority: number }> = [];
 
     for (const [name, nets] of Object.entries(interfaces)) {
       if (!nets) continue;
+      if (ignoredPrefixes.some((prefix) => name.startsWith(prefix))) continue;
 
       for (const net of nets) {
         // Ignora loopback e IPv6 para simplicidade na LAN

@@ -45,7 +45,9 @@ export class PinPairingManager implements IPairingManager {
     const pin = this.cryptoService.generatePin();
     const token = this.cryptoService.generateToken();
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + this.expirationSeconds * 1000);
+    // Se expirationSeconds <= 0 (modo daemon), define expiração longa (1 ano)
+    const ttlMs = this.expirationSeconds > 0 ? this.expirationSeconds * 1000 : 365 * 24 * 60 * 60 * 1000;
+    const expiresAt = new Date(now.getTime() + ttlMs);
 
     this.currentSession = {
       pin,

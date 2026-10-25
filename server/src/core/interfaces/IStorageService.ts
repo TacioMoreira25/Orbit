@@ -23,4 +23,5 @@ export interface IStorageService {
 
   ensureDestinationDirectory(): Promise<string>;
   getDestinationDirectory(): string;
+  deleteFile?(filePath: string): Promise<void>;
 }
