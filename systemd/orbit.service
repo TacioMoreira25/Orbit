@@ -4,13 +4,15 @@ After=network.target
 
 [Service]
 Type=simple
-User=%I
-WorkingDirectory=%h/Documentos/Dev/Projetos/Orbit/server
-ExecStart=/usr/bin/npm run start
+WorkingDirectory=%h/dev/projects/orbit/server
+ExecStart=%h/.local/share/fnm/aliases/default/bin/node dist/main.js
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
-MemoryMax=50M
+Environment=PORT=3000
+Environment=HOST=0.0.0.0
+Environment=PIN_EXPIRATION_SECONDS=0
+MemoryMax=100M
 
 [Install]
 WantedBy=default.target

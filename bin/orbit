@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -e
+
+NODE_BIN="$HOME/.local/share/fnm/aliases/default/bin/node"
+if [ ! -x "$NODE_BIN" ]; then
+  NODE_BIN="$(command -v node)"
+fi
+
+exec "$NODE_BIN" "/home/tacio/dev/projects/orbit/server/dist/cli.js" "$@"

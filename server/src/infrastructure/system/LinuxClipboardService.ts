@@ -1,54 +1,95 @@
-import { exec, spawn } from 'node:child_process';
+import { exec, execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { IClipboardService } from '../../core/interfaces/IClipboardService.js';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export class LinuxClipboardService implements IClipboardService {
-  private isWaylandSession: boolean;
-
-  constructor() {
-    const sessionType = process.env.XDG_SESSION_TYPE || '';
-    const waylandDisplay = process.env.WAYLAND_DISPLAY || '';
-    this.isWaylandSession = sessionType.toLowerCase() === 'wayland' || waylandDisplay.length > 0;
-  }
-
   async writeText(text: string): Promise<boolean> {
-    try {
-      if (this.isWaylandSession) {
-        // Tenta wl-copy no Wayland
-        await this.pipeToCommand('wl-copy', text);
-        return true;
-      } else {
-        // Tenta xclip no X11
-        await this.pipeToCommand('xclip', text, ['-selection', 'clipboard']);
-        return true;
-      }
-    } catch {
-      // Fallback cruzado caso a variável de ambiente não corresponda ao binário instalado
+    // 1. Tenta KDE Plasma Klipper via DBus (qdbus-qt6 / qdbus / gdbus) — funciona em background e systemd sem perder seleção
+    for (const qdbusBin of ['qdbus-qt6', 'qdbus6', 'qdbus']) {
       try {
-        const fallbackCmd = this.isWaylandSession ? 'xclip' : 'wl-copy';
-        const fallbackArgs = this.isWaylandSession ? ['-selection', 'clipboard'] : [];
-        await this.pipeToCommand(fallbackCmd, text, fallbackArgs);
+        await execFileAsync(qdbusBin, [
+          'org.kde.klipper',
+          '/klipper',
+          'org.kde.klipper.klipper.setClipboardContents',
+          text,
+        ]);
+        return true;
+      } catch {
+        // Continua para o próximo método
+      }
+    }
+
+    // 2. Tenta gdbus para org.kde.klipper
+    try {
+      await execFileAsync('gdbus', [
+        'call',
+        '--session',
+        '--dest',
+        'org.kde.klipper',
+        '--object-path',
+        '/klipper',
+        '--method',
+        'org.kde.klipper.klipper.setClipboardContents',
+        text,
+      ]);
+      return true;
+    } catch {
+      // Continua para wl-copy / xclip
+    }
+
+    // 3. Tenta wl-copy (Wayland)
+    try {
+      await this.pipeToCommand('wl-copy', text);
+      return true;
+    } catch {
+      // Continua para xclip / xsel
+    }
+
+    // 4. Tenta xclip / xsel (X11 / XWayland)
+    try {
+      await this.pipeToCommand('xclip', text, ['-selection', 'clipboard']);
+      return true;
+    } catch {
+      try {
+        await this.pipeToCommand('xsel', text, ['--clipboard', '--input']);
         return true;
       } catch (err) {
-        console.error('[Orbit Clipboard] Não foi possível copiar para a área de transferência. Certifique-se de que wl-copy ou xclip estão instalados.', err);
+        console.error(
+          '[Orbit Clipboard] Não foi possível copiar para a área de transferência.',
+          err
+        );
         return false;
       }
     }
   }
 
   async readText(): Promise<string> {
+    for (const qdbusBin of ['qdbus-qt6', 'qdbus6', 'qdbus']) {
+      try {
+        const { stdout } = await execFileAsync(qdbusBin, [
+          'org.kde.klipper',
+          '/klipper',
+          'org.kde.klipper.klipper.getClipboardContents',
+        ]);
+        return stdout.replace(/\n$/, '');
+      } catch {
+        // Continua
+      }
+    }
+
     try {
-      if (this.isWaylandSession) {
-        const { stdout } = await execAsync('wl-paste --no-newline');
-        return stdout;
-      } else {
+      const { stdout } = await execAsync('wl-paste --no-newline');
+      return stdout;
+    } catch {
+      try {
         const { stdout } = await execAsync('xclip -selection clipboard -o');
         return stdout;
+      } catch {
+        return '';
       }
-    } catch {
-      return '';
     }
   }
 

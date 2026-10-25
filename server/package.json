@@ -9,7 +9,8 @@
     "build": "tsc",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/**/*.test.ts"
+    "test": "tsx --test src/**/*.test.ts",
+    "benchmark": "tsx scripts/benchmark-1gb.ts"
   },
   "keywords": [
     "file-transfer",
